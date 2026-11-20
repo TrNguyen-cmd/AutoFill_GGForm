@@ -149,11 +149,17 @@
     return el;
   }
 
-  function updateSumBadge(badgeEl, arr, isMultiSelect = false) {
+  function updateSumBadge(badgeEl, arr, isMultiSelect = false, getBounds = null) {
     const sum = round1(arr.reduce((a, b) => a + (Number(b) || 0), 0));
     if (isMultiSelect) {
-      const avg = round1(sum / 100);
-      badgeEl.textContent = `Tỷ lệ chọn từng đáp án (0% – 100%) · TB ~${avg} đáp án/người`;
+      const rawAvg = round1(sum / 100);
+      const bounds = typeof getBounds === "function" ? getBounds() : null;
+      if (bounds && bounds.max >= bounds.min && (rawAvg > bounds.max || rawAvg < bounds.min)) {
+        const clampedAvg = round1(Math.max(bounds.min, Math.min(bounds.max, rawAvg)));
+        badgeEl.textContent = `Tỷ lệ từng đáp án (0% – 100%) · Giới hạn ${bounds.min}–${bounds.max} đáp án (TB ~${clampedAvg})`;
+      } else {
+        badgeEl.textContent = `Tỷ lệ chọn từng đáp án (0% – 100%) · TB ~${rawAvg} đáp án/người`;
+      }
       badgeEl.className = "pill pill-cyan";
       return;
     }
@@ -170,9 +176,10 @@
     }
   }
 
-  function renderOptionWeightList(container, labels, percentages, idPrefix, onUpdated, isMultiSelect = false) {
+  function renderOptionWeightList(container, labels, percentages, idPrefix, onUpdated, isMultiSelect = false, getBounds = null) {
     const sumPill = createEl("span", "pill");
-    updateSumBadge(sumPill, percentages, isMultiSelect);
+    const refreshBadge = () => updateSumBadge(sumPill, percentages, isMultiSelect, getBounds);
+    refreshBadge();
 
     const toolbar = createEl("div", "question-toolbar");
     const leftGroup = createEl("div", "toolbar-group");
@@ -188,7 +195,7 @@
         rowControls[idx].slider.value = String(val);
         rowControls[idx].numInput.value = String(val);
       });
-      updateSumBadge(sumPill, percentages, isMultiSelect);
+      refreshBadge();
       onUpdated();
     };
 
@@ -231,7 +238,7 @@
       slider.className = "range-slider";
       slider.min = "0";
       slider.max = "100";
-      slider.step = "0.5";
+      slider.step = "0.1";
       slider.value = String(percentages[optIdx] || 0);
       slider.setAttribute("aria-label", `Thanh trượt tỷ lệ ${labelText}`);
 
@@ -242,7 +249,7 @@
       numInput.className = "input-mini";
       numInput.min = "0";
       numInput.max = "100";
-      numInput.step = "0.5";
+      numInput.step = "0.1";
       numInput.value = String(percentages[optIdx] || 0);
       const pctUnit = createEl("span", "field-hint", "%");
       pctWrap.append(numInput, pctUnit);
@@ -258,7 +265,7 @@
         percentages[optIdx] = clamped;
         slider.value = String(clamped);
         numInput.value = String(clamped);
-        updateSumBadge(sumPill, percentages, isMultiSelect);
+        refreshBadge();
         onUpdated();
       };
 
@@ -275,6 +282,7 @@
       row.append(lbl, slider, pctWrap);
       container.appendChild(row);
     });
+    return refreshBadge;
   }
 
   function renderQuestions() {
@@ -310,6 +318,8 @@
       }
       head.append(titleWrap, meta);
       card.appendChild(head);
+
+      const badgeRefiners = [];
 
       // Question selection % + random range for multi-select (checkbox) or optional questions
       if (q.type === "checkbox" || q.type === "grid_checkbox" || q.type === "text" || !q.required) {
@@ -377,6 +387,7 @@
             q.max_select = hi;
             minInp.value = String(lo);
             maxInp.value = String(hi);
+            badgeRefiners.forEach((fn) => fn());
           };
 
           minInp.addEventListener("blur", syncRange);
@@ -384,12 +395,18 @@
           minInp.addEventListener("input", () => {
             minInp.setCustomValidity("");
             const val = Number(minInp.value);
-            if (Number.isFinite(val)) q.min_select = val;
+            if (Number.isFinite(val)) {
+              q.min_select = val;
+              badgeRefiners.forEach((fn) => fn());
+            }
           });
           maxInp.addEventListener("input", () => {
             maxInp.setCustomValidity("");
             const val = Number(maxInp.value);
-            if (Number.isFinite(val)) q.max_select = val;
+            if (Number.isFinite(val)) {
+              q.max_select = val;
+              badgeRefiners.forEach((fn) => fn());
+            }
           });
 
           minLabel.appendChild(minInp);
@@ -401,15 +418,35 @@
         card.appendChild(qToolbar);
       }
 
+      const getBounds = () => ({ min: Number(q.min_select ?? 0), max: Number(q.max_select ?? 0) });
+
       // Per-option percentages
       if (q.type === "radio" || q.type === "dropdown" || q.type === "scale" || q.type === "checkbox") {
-        renderOptionWeightList(card, q.options, q.option_percentages, `q_${q.id}`, () => {}, q.type === "checkbox");
+        const refiner = renderOptionWeightList(
+          card,
+          q.options,
+          q.option_percentages,
+          `q_${q.id}`,
+          () => {},
+          q.type === "checkbox",
+          q.type === "checkbox" ? getBounds : null
+        );
+        badgeRefiners.push(refiner);
       } else if (q.type === "grid_radio" || q.type === "grid_checkbox") {
         q.rows.forEach((rowLabel, rIdx) => {
           const rowBlock = createEl("div", "grid-row-block");
           const rowHeading = createEl("div", "grid-row-heading", `Hàng ${rIdx + 1}: ${rowLabel}`);
           rowBlock.appendChild(rowHeading);
-          renderOptionWeightList(rowBlock, q.columns, q.row_percentages[rIdx], `q_${q.id}_r${rIdx}`, () => {}, q.type === "grid_checkbox");
+          const refiner = renderOptionWeightList(
+            rowBlock,
+            q.columns,
+            q.row_percentages[rIdx],
+            `q_${q.id}_r${rIdx}`,
+            () => {},
+            q.type === "grid_checkbox",
+            q.type === "grid_checkbox" ? getBounds : null
+          );
+          badgeRefiners.push(refiner);
           card.appendChild(rowBlock);
         });
       } else {
