@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoGGForm — Trình Quét &amp; Tự Động Điền Google Form</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+          </svg>
+        </span>
+        <div>
+          <h1>AutoGGForm Control</h1>
+          <p class="brand-subtitle">Quét cấu trúc Google Form đa trang (không ấn gửi) &amp; phân phối tỷ lệ mẫu khảo sát</p>
+        </div>
+      </div>
+
+      <div class="pill pill-cyan" id="top-status-pill">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="top-status-text">Sẵn sàng</span>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <!-- SECTION 1: SCAN GOOGLE FORM -->
+      <section class="card col-12" aria-labelledby="scan-heading">
+        <div class="card-header">
+          <h2 class="card-title" id="scan-heading">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 14l4-4"></path>
+              <path d="M3.34 19a10 10 0 1 1 17.32 0"></path>
+            </svg>
+            <span>Bước 1: Nhập Link &amp; Quét Câu Hỏi Google Form</span>
+          </h2>
+          <span class="pill" id="scan-meta-pill">Chưa quét</span>
+        </div>
+
+        <form id="scan-form" novalidate aria-labelledby="scan-heading">
+          <fieldset>
+            <legend>Tự động chọn đáp án đầu mỗi câu để duyệt hết các trang và dừng trước nút Gửi</legend>
+            <div class="field">
+              <label class="field-label" for="form-url">Đường dẫn Google Form <span aria-hidden="true">*</span></label>
+              <div class="scan-row">
+                <input
+                  class="input-control"
+                  type="url"
+                  id="form-url"
+                  name="form_url"
+                  placeholder="https://docs.google.com/forms/d/e/.../viewform"
+                  required
+                  autocorrect="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  enterkeyhint="go"
+                  aria-describedby="form-url-hint form-url-error"
+                >
+
+                <button class="btn btn-primary" type="submit" id="btn-scan">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                  </svg>
+                  <span>Quét câu hỏi</span>
+                </button>
+
+                <button class="btn btn-secondary" type="button" id="btn-demo">
+                  <span>Tải mẫu thử nghiệm</span>
+                </button>
+              </div>
+              <span class="field-hint" id="form-url-hint">Hệ thống tự chọn đáp án đầu ở mỗi trang và nhấn Tiếp, tuyệt đối không nhấn nút Gửi khi quét.</span>
+              <span class="field-error" id="form-url-error" role="alert"></span>
+            </div>
+
+            <div class="inline-options">
+              <label class="checkbox-label" for="headless-mode">
+                <input class="native-check" type="checkbox" id="headless-mode" name="headless" checked>
+                <span>Chạy trình duyệt ẩn (Headless Chromium)</span>
+              </label>
+            </div>
+          </fieldset>
+        </form>
+
+        <div class="alert-box" id="scan-alert" hidden role="alert" style="margin-top: 12px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span id="scan-alert-text"></span>
+        </div>
+      </section>
+
+      <!-- SECTION 2: QUESTION WEIGHTS & RANDOM SELECTION CONFIG -->
+      <section class="card col-12" aria-labelledby="questions-heading">
+        <div class="card-header">
+          <h2 class="card-title" id="questions-heading">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="4" y1="21" x2="4" y2="14"></line>
+              <line x1="4" y1="10" x2="4" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12" y2="3"></line>
+              <line x1="20" y1="21" x2="20" y2="16"></line>
+              <line x1="20" y1="12" x2="20" y2="3"></line>
+              <line x1="1" y1="14" x2="7" y2="14"></line>
+              <line x1="9" y1="8" x2="15" y2="8"></line>
+              <line x1="17" y1="16" x2="23" y2="16"></line>
+            </svg>
+            <span>Bước 2: Cấu Hình Tỷ Lệ % &amp; Số Lượng Ngẫu Nhiên</span>
+          </h2>
+          <div class="toolbar-group">
+            <button class="btn btn-secondary btn-sm" type="button" id="btn-equalize-all" disabled>Chia đều 100% tất cả</button>
+            <span class="pill" id="questions-count-pill">0 câu hỏi</span>
+          </div>
+        </div>
+
+        <div id="questions-container">
+          <div class="questions-empty">
+            Nhập link Google Form và nhấn <strong>Quét câu hỏi</strong> để hiển thị danh sách câu hỏi và cấu hình tỷ lệ phần trăm (tối đa 100%).
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 3: RUN SCHEDULE & KPI TELEMETRY -->
+      <section class="card col-12" aria-labelledby="run-heading">
+        <div class="card-header">
+          <h2 class="card-title" id="run-heading">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span>Bước 3: Cấu Hình Số Mẫu &amp; Giãn Cách Thời Gian</span>
+          </h2>
+        </div>
+
+        <form id="run-form" novalidate aria-labelledby="run-heading">
+          <fieldset>
+            <legend>Thiết lập số mẫu khảo sát và khoảng giãn cách giữa mỗi lần điền</legend>
+            <div class="run-settings-grid">
+              <div class="field">
+                <label class="field-label" for="total-samples">Số mẫu khảo sát mong muốn <span aria-hidden="true">*</span></label>
+                <input
+                  class="input-control input-control-mono"
+                  type="number"
+                  id="total-samples"
+                  name="total_samples"
+                  min="1"
+                  max="10000"
+                  step="1"
+                  value="10"
+                  required
+                  aria-describedby="total-samples-error"
+                >
+                <span class="field-error" id="total-samples-error" role="alert"></span>
+              </div>
+
+              <div class="field">
+                <span class="field-label">Giãn cách điền mỗi form (phút)</span>
+                <div class="interval-pair">
+                  <div>
+                    <label class="visually-hidden" for="min-minutes">Từ số phút</label>
+                    <input
+                      class="input-control input-control-mono"
+                      type="number"
+                      id="min-minutes"
+                      name="min_minutes"
+                      min="0"
+                      max="1440"
+                      step="0.1"
+                      value="0.5"
+                      required
+                      aria-label="Giãn cách từ (phút)"
+                      aria-describedby="interval-error"
+                    >
+                  </div>
+                  <span style="color: var(--color-text-secondary);">tới</span>
+                  <div>
+                    <label class="visually-hidden" for="max-minutes">Đến số phút</label>
+                    <input
+                      class="input-control input-control-mono"
+                      type="number"
+                      id="max-minutes"
+                      name="max_minutes"
+                      min="0"
+                      max="1440"
+                      step="0.1"
+                      value="1.5"
+                      required
+                      aria-label="Giãn cách tới (phút)"
+                      aria-describedby="interval-error"
+                    >
+                  </div>
+                </div>
+                <span class="field-hint">Nhập 0 tới 0 để chạy liên tục không nghỉ khi thử nghiệm.</span>
+                <span class="field-error" id="interval-error" role="alert"></span>
+              </div>
+
+              <div class="field">
+                <span class="field-label">Thao tác chạy</span>
+                <div class="run-actions">
+                  <button class="btn btn-primary" type="submit" id="btn-start">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    <span>Bắt đầu điền</span>
+                  </button>
+                  <button class="btn btn-secondary" type="button" id="btn-pause" disabled>Tạm dừng</button>
+                  <button class="btn btn-danger" type="button" id="btn-stop" disabled>Dừng hẳn</button>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+        </form>
+
+        <div class="alert-box" id="run-alert" hidden role="alert">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span id="run-alert-text"></span>
+        </div>
+      </section>
+
+      <!-- KPI ROW (3 x 4 cols = 12 cols) -->
+      <section class="col-12 kpi-grid" aria-label="Chỉ số vận hành">
+        <article class="kpi-card">
+          <span class="kpi-label">Tiến độ mẫu khảo sát</span>
+          <div class="kpi-value" id="kpi-progress">0 / 0</div>
+          <span class="kpi-sub" id="kpi-counts">Thành công: 0 · Lỗi: 0</span>
+        </article>
+
+        <article class="kpi-card">
+          <span class="kpi-label">Đếm ngược giãn cách</span>
+          <div class="kpi-value kpi-value-live" id="kpi-countdown">00:00</div>
+          <span class="kpi-sub" id="kpi-interval">Khoảng nghỉ: 0.5 – 1.5 phút</span>
+        </article>
+
+        <article class="kpi-card">
+          <span class="kpi-label">Trạng thái hệ thống</span>
+          <div class="kpi-value" id="kpi-rate">0%</div>
+          <span class="kpi-sub" id="kpi-state">Đang chờ cấu hình</span>
+        </article>
+      </section>
+
+      <!-- TELEMETRY LOGS (8 COLS) & ALERTS SIDEBAR (4 COLS) -->
+      <section class="card col-8" aria-labelledby="logs-heading">
+        <div class="card-header">
+          <h2 class="card-title" id="logs-heading">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            <span>Nhật Ký Điền Khảo Sát Thời Gian Thực</span>
+          </h2>
+          <span class="pill" id="progress-pct-pill">0%</span>
+        </div>
+
+        <div class="progress-block">
+          <div class="progress-header">
+            <label for="job-progress">Mức độ hoàn thành chiến dịch</label>
+            <span class="mono" id="progress-label-text">0 / 0 mẫu</span>
+          </div>
+          <progress id="job-progress" max="100" value="0"></progress>
+          <div class="field-hint" id="live-announcement" role="status" aria-live="polite">Chưa có chiến dịch nào đang chạy.</div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Mẫu #</th>
+                <th>Trạng thái</th>
+                <th>Chi tiết đáp án đã chọn</th>
+              </tr>
+            </thead>
+            <tbody id="logs-tbody">
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--color-text-secondary);">Chưa có dữ liệu thực thi.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="card col-4" aria-labelledby="notes-heading">
+        <div class="card-header">
+          <h2 class="card-title" id="notes-heading">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>Kiểm Soát &amp; Cảnh Báo</span>
+          </h2>
+        </div>
+
+        <div class="alert-box" id="error-sidebar-box" hidden style="margin-bottom: 16px;">
+          <span id="error-sidebar-text"></span>
+        </div>
+
+        <div class="questions-list" style="gap: 12px;">
+          <div class="question-card" style="padding: 14px;">
+            <strong style="display: block; margin-bottom: 4px; color: var(--color-accent-primary);">Cơ chế quét an toàn</strong>
+            <p class="field-hint" style="margin: 0;">Khi quét form, công cụ tự chọn đáp án đầu để vượt qua các trang bắt buộc và tự dừng lại khi gặp nút Gửi cuối cùng.</p>
+          </div>
+          <div class="question-card" style="padding: 14px;">
+            <strong style="display: block; margin-bottom: 4px; color: var(--color-accent-live);">Giới hạn tối đa 100%</strong>
+            <p class="field-hint" style="margin: 0;">Tổng tỷ lệ % các đáp án trong mỗi câu được khóa tối đa 100% và quy đổi chính xác theo số mẫu mong muốn.</p>
+          </div>
+          <div class="question-card" style="padding: 14px;">
+            <strong style="display: block; margin-bottom: 4px; color: var(--color-accent-warn);">Câu nhiều lựa chọn (Checkbox)</strong>
+            <p class="field-hint" style="margin: 0;">Cho phép đặt tỷ lệ % chọn câu hỏi đó, khoảng số lượng đáp án ngẫu nhiên [Từ – Đến], và tỷ lệ % ưu tiên từng đáp án.</p>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
