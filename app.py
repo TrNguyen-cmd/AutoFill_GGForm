@@ -155,20 +155,20 @@ def _validate_question_config(q: dict[str, Any]) -> None:
     qtype = q.get("type", "text")
     title = q.get("title", "Câu hỏi")
     q_pct = float(q.get("question_pct", 100.0))
-    if q_pct < -1e-6 or q_pct > 100.0 + 1e-6:
+    if not math.isfinite(q_pct) or q_pct < -1e-6 or q_pct > 100.0 + 1e-6:
         raise ValueError(f"Tỷ lệ chọn câu hỏi '{title}' phải nằm trong khoảng 0% - 100%")
 
     if qtype in ("radio", "dropdown", "scale"):
         pcts = [float(x) for x in q.get("option_percentages", [])]
-        if any(p < -1e-6 for p in pcts):
-            raise ValueError(f"Tỷ lệ % đáp án ở '{title}' không thể âm")
+        if any((not math.isfinite(p)) or p < -1e-6 for p in pcts):
+            raise ValueError(f"Tỷ lệ % đáp án ở '{title}' không hợp lệ")
         if sum(pcts) > 100.0 + 1e-6:
             raise ValueError(f"Tổng tỷ lệ % ở '{title}' vượt quá 100%")
         if q.get("required") and pcts and sum(pcts) <= 1e-6:
             raise ValueError(f"Câu bắt buộc '{title}' cần tổng tỷ lệ % đáp án lớn hơn 0%")
     elif qtype == "checkbox":
         pcts = [float(x) for x in q.get("option_percentages", [])]
-        if any(p < -1e-6 or p > 100.0 + 1e-6 for p in pcts):
+        if any((not math.isfinite(p)) or p < -1e-6 or p > 100.0 + 1e-6 for p in pcts):
             raise ValueError(f"Tỷ lệ % đáp án ở '{title}' phải nằm trong khoảng 0% - 100%")
         opts_len = len(q.get("options", []))
         min_sel = int(q.get("min_select", 1))
@@ -182,8 +182,8 @@ def _validate_question_config(q: dict[str, Any]) -> None:
         row_pcts = q.get("row_percentages") or [q.get("option_percentages", []) for _ in rows]
         for r_idx, pcts in enumerate(row_pcts):
             vals = [float(x) for x in pcts]
-            if any(p < -1e-6 for p in vals):
-                raise ValueError(f"Tỷ lệ % dòng {r_idx + 1} ở '{title}' không thể âm")
+            if any((not math.isfinite(p)) or p < -1e-6 for p in vals):
+                raise ValueError(f"Tỷ lệ % dòng {r_idx + 1} ở '{title}' không hợp lệ")
             if sum(vals) > 100.0 + 1e-6:
                 raise ValueError(f"Tổng tỷ lệ % dòng {r_idx + 1} ở '{title}' vượt quá 100%")
     elif qtype == "grid_checkbox":
@@ -191,7 +191,7 @@ def _validate_question_config(q: dict[str, Any]) -> None:
         row_pcts = q.get("row_percentages") or [q.get("option_percentages", []) for _ in rows]
         for r_idx, pcts in enumerate(row_pcts):
             vals = [float(x) for x in pcts]
-            if any(p < -1e-6 or p > 100.0 + 1e-6 for p in vals):
+            if any((not math.isfinite(p)) or p < -1e-6 or p > 100.0 + 1e-6 for p in vals):
                 raise ValueError(f"Tỷ lệ % dòng {r_idx + 1} ở '{title}' phải nằm trong khoảng 0% - 100%")
         min_sel = int(q.get("min_select", 1))
         max_sel = int(q.get("max_select", max(1, len(q.get("columns", [])))))
@@ -710,6 +710,15 @@ def _advance_to_next_page(page: Page, next_btn: Any, page_idx: int) -> None:
     page.wait_for_timeout(450)
 
 
+def _ensure_not_google_login(page: Page) -> None:
+    """Abort clearly if Google redirected to an authentication wall."""
+    parsed = urlparse(page.url or "")
+    if (parsed.hostname or "").lower() == "accounts.google.com":
+        raise RuntimeError(
+            "Google Form này yêu cầu đăng nhập tài khoản Google nên không thể quét/điền tự động."
+        )
+
+
 def scan_google_form(url: str, headless: bool = True) -> dict[str, Any]:
     """Open a Google Form, select first answers page-by-page to scan all questions, and NEVER click Submit."""
     # shortcut: conditional branching follows only the first-option path; forms with hidden branches require separate scans.
@@ -723,6 +732,7 @@ def scan_google_form(url: str, headless: bool = True) -> dict[str, Any]:
         page = context.new_page()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            _ensure_not_google_login(page)
             page.wait_for_selector('div[role="listitem"], form', timeout=15000)
             page.wait_for_timeout(500)
 
@@ -866,6 +876,7 @@ def fill_single_submission(
         page = context.new_page()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            _ensure_not_google_login(page)
             page.wait_for_selector('div[role="listitem"], form', timeout=15000)
             page.wait_for_timeout(450)
 
@@ -966,6 +977,7 @@ class JobManager:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         self.reset_state()
 
@@ -1006,6 +1018,7 @@ class JobManager:
         with self._lock:
             if self.state["status"] in ("running", "waiting", "paused"):
                 raise RuntimeError("Đang có tiến trình chạy, hãy dừng trước khi bắt đầu mới.")
+            self._wake_event.clear()
             self.state = {
                 "status": "running",
                 "total_samples": total_samples,
@@ -1036,6 +1049,7 @@ class JobManager:
                     self.state["status"] = "paused"
                 else:
                     self.state["status"] = "waiting" if self.state["countdown_seconds"] > 0 else "running"
+                self._wake_event.set()
             return {**self.state, "logs": list(self.state["logs"])}
 
     def stop(self) -> dict[str, Any]:
@@ -1043,6 +1057,7 @@ class JobManager:
             if self.state["status"] in ("running", "waiting", "paused"):
                 self.state["stop_requested"] = True
                 self.state["paused"] = False
+                self._wake_event.set()
             return {**self.state, "logs": list(self.state["logs"])}
 
     def _append_log(
@@ -1071,7 +1086,8 @@ class JobManager:
                     return True
                 if not self.state["paused"]:
                     return False
-            time.sleep(0.3)
+            self._wake_event.wait(timeout=0.3)
+            self._wake_event.clear()
 
     def _worker(
         self,
@@ -1082,63 +1098,72 @@ class JobManager:
         max_minutes: float,
         headless: bool,
     ) -> None:
-        total = len(plan)
-        for idx, sample in enumerate(plan, start=1):
-            if self._wait_if_paused_or_stopped():
+        try:
+            total = len(plan)
+            for idx, sample in enumerate(plan, start=1):
+                if self._wait_if_paused_or_stopped():
+                    with self._lock:
+                        self.state["status"] = "stopped"
+                        self.state["countdown_seconds"] = 0
+                    self._append_log(idx, "stopped", "Người dùng đã dừng tiến trình.")
+                    return
+
                 with self._lock:
-                    self.state["status"] = "stopped"
+                    self.state["status"] = "running"
                     self.state["countdown_seconds"] = 0
-                self._append_log(idx, "stopped", "Người dùng đã dừng tiến trình.")
-                return
+
+                try:
+                    result = fill_single_submission(url, questions, sample["answers"], headless=headless)
+                    with self._lock:
+                        self.state["completed"] += 1
+                        self.state["success_count"] += 1
+                    self._append_log(
+                        idx,
+                        "success",
+                        result.get("summary") or "Đã gửi thành công",
+                        result.get("answers"),
+                    )
+                except Exception as exc:
+                    with self._lock:
+                        self.state["completed"] += 1
+                        self.state["error_count"] += 1
+                        self.state["last_error"] = str(exc)
+                    self._append_log(idx, "error", str(exc))
+
+                if idx < total:
+                    delay_sec = random.uniform(min_minutes * 60.0, max_minutes * 60.0)
+                    if delay_sec > 0.2:
+                        total_wait = int(math.ceil(delay_sec))
+                        with self._lock:
+                            self.state["status"] = "waiting"
+                            self.state["current_interval_seconds"] = total_wait
+                            self.state["countdown_seconds"] = total_wait
+
+                        remaining = delay_sec
+                        while remaining > 0:
+                            if self._wait_if_paused_or_stopped():
+                                with self._lock:
+                                    self.state["status"] = "stopped"
+                                    self.state["countdown_seconds"] = 0
+                                self._append_log(idx + 1, "stopped", "Đã dừng trong lúc chờ giãn cách.")
+                                return
+                            slice_start = time.monotonic()
+                            self._wake_event.wait(timeout=min(0.5, remaining))
+                            self._wake_event.clear()
+                            elapsed = time.monotonic() - slice_start
+                            remaining = max(0.0, remaining - elapsed)
+                            with self._lock:
+                                self.state["countdown_seconds"] = max(0, int(math.ceil(remaining)))
 
             with self._lock:
-                self.state["status"] = "running"
+                self.state["status"] = "completed"
                 self.state["countdown_seconds"] = 0
-
-            try:
-                result = fill_single_submission(url, questions, sample["answers"], headless=headless)
-                with self._lock:
-                    self.state["completed"] += 1
-                    self.state["success_count"] += 1
-                self._append_log(
-                    idx,
-                    "success",
-                    result.get("summary") or "Đã gửi thành công",
-                    result.get("answers"),
-                )
-            except Exception as exc:
-                with self._lock:
-                    self.state["completed"] += 1
-                    self.state["error_count"] += 1
-                    self.state["last_error"] = str(exc)
-                self._append_log(idx, "error", str(exc))
-
-            if idx < total:
-                delay_sec = random.uniform(min_minutes * 60.0, max_minutes * 60.0)
-                if delay_sec > 0.2:
-                    total_wait = int(math.ceil(delay_sec))
-                    with self._lock:
-                        self.state["status"] = "waiting"
-                        self.state["current_interval_seconds"] = total_wait
-                        self.state["countdown_seconds"] = total_wait
-
-                    remaining = delay_sec
-                    while remaining > 0:
-                        if self._wait_if_paused_or_stopped():
-                            with self._lock:
-                                self.state["status"] = "stopped"
-                                self.state["countdown_seconds"] = 0
-                            self._append_log(idx + 1, "stopped", "Đã dừng trong lúc chờ giãn cách.")
-                            return
-                        step = min(0.5, remaining)
-                        time.sleep(step)
-                        remaining -= step
-                        with self._lock:
-                            self.state["countdown_seconds"] = max(0, int(math.ceil(remaining)))
-
-        with self._lock:
-            self.state["status"] = "completed"
-            self.state["countdown_seconds"] = 0
+        except Exception as exc:
+            with self._lock:
+                self.state["status"] = "error"
+                self.state["countdown_seconds"] = 0
+                self.state["last_error"] = str(exc)
+            self._append_log(0, "error", f"Lỗi worker: {exc}")
 
 
 JOB_MANAGER = JobManager()
@@ -1171,8 +1196,13 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
 
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > 5 * 1024 * 1024:
+                raise ValueError("Kích thước payload không hợp lệ (tối đa 5MB)")
             raw = self.rfile.read(length) if length > 0 else b"{}"
-            return json.loads(raw.decode("utf-8"))
+            parsed = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed, dict):
+                raise ValueError("JSON payload phải là object")
+            return parsed
 
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
@@ -1182,7 +1212,7 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
 
             rel_path = "index.html" if parsed.path == "/" else parsed.path.lstrip("/")
             target = (STATIC_DIR / rel_path).resolve()
-            if not str(target).startswith(str(STATIC_DIR.resolve())) or not target.is_file():
+            if not target.is_relative_to(STATIC_DIR.resolve()) or not target.is_file():
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
                 return
 
@@ -1233,8 +1263,14 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                 if total_samples < 1 or total_samples > 10000:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Số mẫu khảo sát phải từ 1 đến 10.000"})
                     return
-                if min_minutes < 0 or max_minutes < min_minutes:
-                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Khoảng thời gian giãn cách (từ phút -> tới phút) không hợp lệ"})
+                if (
+                    not math.isfinite(min_minutes)
+                    or not math.isfinite(max_minutes)
+                    or min_minutes < 0
+                    or max_minutes < min_minutes
+                    or max_minutes > 1440
+                ):
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Khoảng thời gian giãn cách (0 - 1440 phút) không hợp lệ"})
                     return
                 if not isinstance(questions, list) or not questions:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Chưa có danh sách câu hỏi để điền"})

@@ -8,6 +8,7 @@
     pageCount: 0,
     questions: [],
     pollTimer: null,
+    pollInFlight: false,
     scanning: false,
     jobStatus: "idle",
   };
@@ -678,6 +679,20 @@
           showAlert(runAlert, runAlertText, `Câu bắt buộc "${q.title}" cần tổng tỷ lệ % lớn hơn 0%.`);
           return;
         }
+      } else if (q.type === "checkbox" || q.type === "grid_checkbox") {
+        const minSel = Number(q.min_select);
+        const maxSel = Number(q.max_select);
+        if (!Number.isInteger(minSel) || !Number.isInteger(maxSel) || minSel < 0 || maxSel < minSel) {
+          showAlert(runAlert, runAlertText, `Khoảng số lượng ngẫu nhiên của câu "${q.title}" không hợp lệ (Từ <= Đến).`);
+          return;
+        }
+        const pctLists = q.type === "checkbox" ? [q.option_percentages || []] : (q.row_percentages || []);
+        for (const list of pctLists) {
+          if (list.some((v) => !Number.isFinite(Number(v)) || Number(v) < 0 || Number(v) > 100)) {
+            showAlert(runAlert, runAlertText, `Tỷ lệ % đáp án của câu "${q.title}" phải trong khoảng 0% - 100%.`);
+            return;
+          }
+        }
       }
     }
 
@@ -737,16 +752,32 @@
   });
 
   btnPause.addEventListener("click", async () => {
-    const resp = await fetch(`${API_BASE}/api/pause`, { method: "POST" });
-    if (resp.ok) {
-      applyStatusSnapshot(await resp.json());
+    btnPause.disabled = true;
+    try {
+      const resp = await fetch(`${API_BASE}/api/pause`, { method: "POST" });
+      if (resp.ok) {
+        applyStatusSnapshot(await resp.json());
+      }
+    } catch (err) {
+      showAlert(runAlert, runAlertText, `Không thể tạm dừng/tiếp tục: ${err.message}`);
+    } finally {
+      const isActive = state.jobStatus === "running" || state.jobStatus === "waiting" || state.jobStatus === "paused";
+      btnPause.disabled = !isActive;
     }
   });
 
   btnStop.addEventListener("click", async () => {
-    const resp = await fetch(`${API_BASE}/api/stop`, { method: "POST" });
-    if (resp.ok) {
-      applyStatusSnapshot(await resp.json());
+    btnStop.disabled = true;
+    try {
+      const resp = await fetch(`${API_BASE}/api/stop`, { method: "POST" });
+      if (resp.ok) {
+        applyStatusSnapshot(await resp.json());
+      }
+    } catch (err) {
+      showAlert(runAlert, runAlertText, `Không thể dừng tiến trình: ${err.message}`);
+    } finally {
+      const isActive = state.jobStatus === "running" || state.jobStatus === "waiting" || state.jobStatus === "paused";
+      btnStop.disabled = !isActive;
     }
   });
 
@@ -845,7 +876,10 @@
 
   function startPolling() {
     if (state.pollTimer) clearInterval(state.pollTimer);
+    state.pollInFlight = false;
     state.pollTimer = setInterval(async () => {
+      if (state.pollInFlight) return;
+      state.pollInFlight = true;
       try {
         const resp = await fetch(`${API_BASE}/api/status`);
         if (resp.ok) {
@@ -853,6 +887,8 @@
         }
       } catch {
         // Ignore transient poll errors
+      } finally {
+        state.pollInFlight = false;
       }
     }, 1000);
   }

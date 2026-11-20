@@ -17,6 +17,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from app import (
+    _ensure_not_google_login,
     allocate_boolean_quota,
     allocate_quotas,
     build_submission_plan,
@@ -320,6 +321,37 @@ def test_http_api_and_tokens() -> None:
             raise AssertionError("Should return 400 when option sum > 100%")
         except urllib.error.HTTPError as err:
             assert err.code == 400
+
+        # Risk checks: path traversal, non-dict JSON, NaN/Infinity, max_minutes > 1440, Google login detection
+        for bad_path in ("/../app.py", "/..%2fapp.py"):
+            try:
+                urllib.request.urlopen(base + bad_path)
+                raise AssertionError(f"Should reject path traversal: {bad_path}")
+            except urllib.error.HTTPError as err:
+                assert err.code == 404
+
+        for raw_body in (b"[]", b"{bad json", b'{"url":"https://docs.google.com/forms/d/e/test/viewform","total_samples":1,"min_minutes":NaN,"max_minutes":1,"questions":[]}', b'{"url":"https://docs.google.com/forms/d/e/test/viewform","total_samples":1,"min_minutes":0,"max_minutes":2000,"questions":[{"id":"q1","title":"Q","type":"radio","required":true,"options":["A"],"option_percentages":[100]}]}'):
+            bad_req = urllib.request.Request(
+                base + "/api/start",
+                data=raw_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(bad_req)
+                raise AssertionError(f"Should reject invalid payload: {raw_body}")
+            except urllib.error.HTTPError as err:
+                assert err.code == 400
+
+        class _FakePage:
+            def __init__(self, url: str) -> None:
+                self.url = url
+
+        try:
+            _ensure_not_google_login(_FakePage("https://accounts.google.com/v3/signin/identifier"))
+            raise AssertionError("Should reject accounts.google.com redirect")
+        except RuntimeError:
+            pass
 
         # CSS token check: no raw hex colors outside :root
         css_text = (ROOT_DIR / "static" / "styles.css").read_text(encoding="utf-8")
